@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  firestore:
+    image: google/cloud-sdk:emulators
+    command: gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+    ports:
+      - "8081:8080"
+
+  storage:
+    image: fsouza/fake-gcs-server
+    command: -scheme http
+    ports:
+      - "4443:4443"
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8080
+      - GCP_PROJECT_ID=utba-swarmmap
+      - FIRESTORE_EMULATOR_HOST=firestore:8080
+      - STORAGE_EMULATOR_HOST=storage:4443
+      - GCS_BUCKET_NAME=utba-swarmmap-media
+      - GOOGLE_CLIENT_ID=fake-id
+      - GOOGLE_CLIENT_SECRET=fake-secret
+      - GOOGLE_REDIRECT_URL=http://localhost:8080/auth/google/callback
+    ports:
+      - "8080:8080"
+    depends_on:
+      - firestore
+      - storage
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      - PORT=8081
+    ports:
+      - "8082:8081"
