@@ -1,11 +1,13 @@
+# Copyright (c) 2026 Frank Currie (frank@sfle.ca)
 ---
 extends: default
 
 ignore:
-  - "node_modules/"
-  - "vendor/"
-  - "backend/vendor/"
-  - ".git/"
+  - 'node_modules/'
+  - 'vendor/'
+  - 'backend/vendor/'
+  - '.git/'
+  - '.agents/'
 
 rules:
   line-length:
@@ -14,5 +16,5 @@ rules:
   indentation:
     spaces: 2
   truthy:
-    allowed-values: ["true", "false", "yes", "no"]
+    allowed-values: ['true', 'false', 'yes', 'no', 'on', 'off']
   document-start: disable

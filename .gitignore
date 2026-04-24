@@ -1,3 +1,5 @@
+# Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 # Dependency directories
 node_modules/
 
@@ -29,3 +31,8 @@ bin/
 
 # Logs
 *.log
+
+# Test results
+test-results/
+playwright-report/
+blob-report/

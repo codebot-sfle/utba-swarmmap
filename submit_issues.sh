@@ -1,4 +1,5 @@
 #!/bin/bash
+# Copyright (c) 2026 Frank Currie (frank@sfle.ca)
 
 # Issue 1: Map Display Issues
 gh issue create \
@@ -98,4 +99,4 @@ gh issue create \
 - [ ] Create user management interface
 - [ ] Add analytics and reporting features" \
   --label "enhancement" \
-  --label "medium-priority" 
+  --label "medium-priority"

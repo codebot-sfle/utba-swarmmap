@@ -1,5 +1,7 @@
+# Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 # STAGE 1: Build the minimal server
-FROM golang:1.25.8-alpine AS builder
+FROM golang:1.25.9-alpine AS builder
 
 WORKDIR /app
 COPY main.go .
@@ -8,7 +10,7 @@ COPY main.go .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server main.go
 
 # STAGE 2: Create the final image
-FROM alpine:latest
+FROM alpine:3.21.3
 
 WORKDIR /app
 

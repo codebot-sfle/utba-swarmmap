@@ -1,3 +1,4 @@
+<!-- Copyright (c) 2026 Frank Currie (frank@sfle.ca) -->
 # UTBA Swarm Map
 
 A web application for tracking and managing bee swarms. This application allows the public to report bee swarms and enables beekeepers to manage and respond to those reports.
@@ -14,7 +15,8 @@ This separation allows the frontend (styling, UI logic) to be developed and depl
 
 ## Features
 
-- **Interactive Map**: Shows reported bee swarms using OpenStreetMap and Leaflet.js.
+- **Interactive Map**: Shows reported bee swarms using high-performance Mapbox GL JS v3 vector tiles.
+- **Enhanced Mapping**: Supports Mapbox native clustering and Mapbox Geocoding API (with Nominatim fallback) for superior performance and aesthetics.
 - **Public Swarm Reporting**: Anyone can report a swarm, optionally including photos and videos.
 - **Camera & Gallery Upload**: On mobile, users can either take a new photo/video or upload an existing one from their gallery.
 - **Admin Dashboard**: A comprehensive dashboard for administrators to manage users and swarms.
@@ -25,10 +27,21 @@ This separation allows the frontend (styling, UI logic) to be developed and depl
 
 - **Backend**: Go
 - **Frontend**: Go (for serving), HTML, CSS, vanilla JavaScript
-- **UI Libraries**: Bootstrap, [Chart.js](https://www.chartjs.org/), Leaflet.js
+- **UI Libraries**: Bootstrap, [Chart.js](https://www.chartjs.org/), Mapbox GL JS v3
 - **Database**: Google Cloud Firestore
 - **Storage**: Google Cloud Storage
 - **Deployment**: Docker, Google Cloud Run
+
+## Environment Variables
+
+The application can be configured using the following environment variables:
+
+- `MAPBOX_ACCESS_TOKEN`: (Optional) If provided, the application will use Mapbox for map tiles and reverse geocoding.
+- `FRONTEND_ASSETS_URL`: The URL of the frontend service serving static assets.
+- `GOOGLE_CLIENT_ID`: Required for Google OAuth.
+- `GOOGLE_CLIENT_SECRET`: Required for Google OAuth.
+- `GITHUB_TOKEN`: Required for feedback submission. A Personal Access Token with repo scope.
+- `GITHUB_REPO`: (Optional) The GitHub repository where feedback issues will be created (default: `fkcurrie/utba-swarmmap`).
 
 ## Local Development & Deployment
 
@@ -45,7 +58,17 @@ The primary workflow is to build Docker images locally, push them to a container
 
 Instructions for running each service locally will be added in a future update.
 
-### Deployment
+### Automated Deployment (GitHub Actions)
+
+This project includes a GitHub Actions workflow for automated validation and deployment to Google Cloud Run.
+
+- **Workflow File**: `.github/workflows/deploy.yml`
+- **Trigger**: The workflow triggers on every push to the `main` branch and on tags matching `v*`.
+- **Validation**: After deployment, the workflow performs a health check and runs end-to-end tests using Playwright to ensure the site is functional and assets are loading correctly.
+- **Automatic Rollback**: If validation fails, the workflow automatically rolls back both backend and frontend services to their previous stable revisions and creates a GitHub Issue to notify the team.
+- **Secrets**: The workflow uses Workload Identity Federation for secure authentication with Google Cloud.
+
+### Manual Deployment
 
 Both the frontend and backend have their own `Dockerfile` and can be deployed independently.
 
@@ -56,16 +79,16 @@ Both the frontend and backend have their own `Dockerfile` and can be deployed in
 cd backend
 
 # Build the Docker image
-docker build -t gcr.io/[PROJECT_ID]/utba-swarmmap-backend:latest .
+docker build -t northamerica-northeast2-docker.pkg.dev/[PROJECT_ID]/swarmmap-repo/backend:latest .
 
-# Push the image to Google Container Registry
-docker push gcr.io/[PROJECT_ID]/utba-swarmmap-backend:latest
+# Push the image to Google Artifact Registry
+docker push northamerica-northeast2-docker.pkg.dev/[PROJECT_ID]/swarmmap-repo/backend:latest
 
 # Deploy to Cloud Run
 gcloud run deploy utba-swarmmap-backend \
-  --image gcr.io/[PROJECT_ID]/utba-swarmmap-backend:latest \
+  --image northamerica-northeast2-docker.pkg.dev/[PROJECT_ID]/swarmmap-repo/backend:latest \
   --platform managed \
-  --region [YOUR_REGION] \
+  --region northamerica-northeast2 \
   --allow-unauthenticated \
   --port 8080
 ```
@@ -79,16 +102,16 @@ After the initial backend deployment, get the backend service URL. You will need
 cd frontend
 
 # Build the Docker image
-docker build -t gcr.io/[PROJECT_ID]/utba-swarmmap-frontend:latest .
+docker build -t northamerica-northeast2-docker.pkg.dev/[PROJECT_ID]/swarmmap-repo/frontend:latest .
 
-# Push the image to Google Container Registry
-docker push gcr.io/[PROJECT_ID]/utba-swarmmap-frontend:latest
+# Push the image to Google Artifact Registry
+docker push northamerica-northeast2-docker.pkg.dev/[PROJECT_ID]/swarmmap-repo/frontend:latest
 
 # Deploy to Cloud Run
 gcloud run deploy utba-swarmmap-frontend \
-  --image gcr.io/[PROJECT_ID]/utba-swarmmap-frontend:latest \
+  --image northamerica-northeast2-docker.pkg.dev/[PROJECT_ID]/swarmmap-repo/frontend:latest \
   --platform managed \
-  --region [YOUR_REGION] \
+  --region northamerica-northeast2 \
   --allow-unauthenticated
 ```
 

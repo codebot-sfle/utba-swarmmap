@@ -1,0 +1,47 @@
+<!-- Copyright (c) 2026 Frank Currie (frank@sfle.ca) -->
+{{template "header.html" .}}
+
+<div class="container mt-5 pt-5">
+    <div class="row justify-content-center">
+        <div class="col-md-6 col-lg-5">
+            <div class="card border-0 shadow-lg">
+                <div class="card-header bg-white border-bottom-0 pt-4 px-4 text-center">
+                    <h4 class="fw-bold mb-0"><i class="fa-solid fa-rocket me-2 text-primary"></i> System Bootstrap</h4>
+                </div>
+                <div class="card-body p-5 pt-4">
+                    <p class="text-muted small text-center mb-4">Create the initial site administrator account to get started.</p>
+                    
+                    {{if .Error}}
+                    <div class="alert alert-danger border-0 small" role="alert">
+                        <i class="fa-solid fa-circle-exclamation me-2"></i> {{.Error}}
+                    </div>
+                    {{end}}
+
+                    {{if .Success}}
+                    <div class="alert alert-success border-0 small text-center" role="alert">
+                        <i class="fa-solid fa-circle-check me-2"></i> {{.Success}}
+                        <div class="mt-3">
+                            <a href="/login" class="btn btn-success btn-sm px-4">Go to Login</a>
+                        </div>
+                    </div>
+                    {{else}}
+                    <form action="/bootstrap" method="POST" aria-label="Bootstrap Admin Form">
+                        <div class="mb-3">
+                            <label for="name" class="form-label small fw-bold text-muted text-uppercase">Full Name</label>
+                            <input type="text" class="form-control bg-light border-0 py-2" id="name" name="name" required placeholder="Frank Currie">
+                        </div>
+                        <div class="mb-4">
+                            <label for="email" class="form-label small fw-bold text-muted text-uppercase">Email Address</label>
+                            <input type="email" class="form-control bg-light border-0 py-2" id="email" name="email" required placeholder="frank@example.com">
+                            <div class="form-text small opacity-75 mt-2">Must match your Google Login email.</div>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100 py-2 shadow-sm">Create Admin Account</button>
+                    </form>
+                    {{end}}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{template "footer.html" .}}

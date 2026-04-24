@@ -1,149 +1,157 @@
+<!-- Copyright (c) 2026 Frank Currie (frank@sfle.ca) -->
 {{template "header.html" .}}
 
-    <div class="container-fluid">
-        <div class="row">
-            <div class="col-md-12">
-                <div id="map"></div>
-            </div>
+<div class="container-fluid py-4 px-lg-5">
+    <!-- Header Section -->
+    <div class="row mb-4 align-items-center">
+        <div class="col-md-6">
+            <h1 class="h3 fw-bold mb-0">
+                <i class="fa-solid fa-map-location-dot me-2 text-primary"></i>Collectors Map
+            </h1>
+            <p class="text-muted small mb-0 mt-1">Real-time bee swarm tracking and management</p>
         </div>
-        <div class="row mt-1 mb-3">
-            <div class="col-md-12 text-center">
-                <button id="reportSwarmBtn" class="btn btn-primary mr-2">Report Swarm at My Location</button>
-                <button id="refreshMapBtn" class="btn btn-secondary mr-2">Clear & Refresh Map</button>
-                <small class="text-muted"> (Or click on the map to report at a specific spot)</small>
-            </div>
-        </div>
-        
-        <!-- Pin Color Legend -->
-        <div class="row mb-3">
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-body py-2">
-                        <h6 class="card-title mb-2">Pin Color Legend:</h6>
-                        <div class="d-flex flex-wrap justify-content-center">
-                            <span class="mr-3 mb-1">
-                                <span style="display: inline-block; width: 20px; height: 20px; background-color: #ff0000; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); vertical-align: middle;"></span>
-                                <small class="ml-1">Red = Reported (new)</small>
-                            </span>
-                            <span class="mr-3 mb-1">
-                                <span style="display: inline-block; width: 20px; height: 20px; background-color: #ff69b4; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); vertical-align: middle;"></span>
-                                <small class="ml-1">Pink = Verified</small>
-                            </span>
-                            <span class="mr-3 mb-1">
-                                <span style="display: inline-block; width: 20px; height: 20px; background-color: #00ff00; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); vertical-align: middle;"></span>
-                                <small class="ml-1">Green = Captured</small>
-                            </span>
-                            <span class="mr-3 mb-1">
-                                <span style="display: inline-block; width: 20px; height: 20px; background-color: #0000ff; border-radius: 50%; border: 3px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3); vertical-align: middle;"></span>
-                                <small class="ml-1">Blue = Archived (24h+)</small>
-                            </span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-        
-        <!-- Debug Section (can be removed later) -->
-        <div class="row mb-3">
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-body py-2">
-                        <h6 class="card-title mb-2">Swarm Data (All - for Collectors):</h6>
-                        <div id="debugSwarms" style="font-size: 12px; max-height: 150px; overflow-y: auto;">
-                            <em>All swarm reports will appear here after loading.</em>
-                        </div>
-                    </div>
-                </div>
+        <div class="col-md-6 text-md-end mt-3 mt-md-0">
+            <div class="btn-group shadow-sm">
+                <button type="button" class="btn btn-white btn-sm fw-bold border-end" id="btnRecenter">
+                    <i class="fa-solid fa-location-crosshairs me-1"></i> Recenter
+                </button>
+                <button type="button" class="btn btn-white btn-sm fw-bold" id="btnRefresh">
+                    <i class="fa-solid fa-rotate me-1"></i> Refresh
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- Report Swarm Modal -->
-    <div class="modal fade" id="reportSwarmModal" tabindex="-1" role="dialog" aria-labelledby="reportSwarmModalLabel" aria-hidden="true">
-        <div class="modal-dialog" role="document">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h5 class="modal-title" id="reportSwarmModalLabel">Report Bee Swarm</h5>
-                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                        <span aria-hidden="true">&times;</span>
-                    </button>
+    <!-- Main Content Section -->
+    <div class="row g-4 mb-4">
+        <!-- Left Column: Map and Legend -->
+        <div class="col-lg-9 order-1">
+            <!-- Map Section -->
+            <div class="card border-0 shadow-sm overflow-hidden mb-4" style="height: 600px; border-radius: var(--border-radius-lg);">
+                <div id="map" class="h-100 w-100" style="min-height: 500px;"></div>
+            </div>
+
+            <!-- Legend Section -->
+            <div class="card border-0 shadow-sm">
+                <div class="card-body p-4">
+                    <h2 id="legendTitle" class="h6 fw-bold mb-4 tracking-wider text-uppercase text-muted"><i class="fa-solid fa-circle-info me-2 text-warning"></i>Map Legend</h2>
+                    <div class="d-flex flex-wrap gap-4" role="list">
+                        <div class="legend-item d-flex align-items-center" role="listitem">
+                            <span class="legend-color" style="background-color: rgb(232, 65, 24);" aria-hidden="true"></span>
+                            <span class="small fw-bold text-uppercase tracking-wider">Reported (New)</span>
+                        </div>
+                        <div class="legend-item d-flex align-items-center" role="listitem">
+                            <span class="legend-color" style="background-color: rgb(251, 197, 49);" aria-hidden="true"></span>
+                            <span class="small fw-bold text-uppercase tracking-wider">Verified</span>
+                        </div>
+                        <div class="legend-item d-flex align-items-center" role="listitem">
+                            <span class="legend-color" style="background-color: rgb(255, 140, 0);" aria-hidden="true"></span>
+                            <span class="small fw-bold text-uppercase tracking-wider">Claimed</span>
+                        </div>
+                        <div class="legend-item d-flex align-items-center" role="listitem">
+                            <span class="legend-color" style="background-color: rgb(76, 209, 55);" aria-hidden="true"></span>
+                            <span class="small fw-bold text-uppercase tracking-wider">Captured</span>
+                        </div>
+                        <div class="legend-item d-flex align-items-center" role="listitem">
+                            <span class="legend-color" style="background-color: rgb(72, 126, 176);" aria-hidden="true"></span>
+                            <span class="small fw-bold text-uppercase tracking-wider">Archived (24h+)</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="modal-body">
-                    <form id="reportSwarmForm">
-                        <div class="form-group">
-                            <label for="description">Description (e.g., size of swarm, height from ground, on a tree branch)</label>
-                            <textarea class="form-control" id="description" name="description" rows="3" required></textarea>
+            </div>
+        </div>
+        
+        <!-- Right Column: List Section -->
+        <div class="col-lg-3 order-2">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body p-4">
+                    <h2 class="h6 fw-bold mb-3"><i class="fa-solid fa-list me-2 text-muted"></i>Active Swarms List</h2>
+                    <div id="debugSwarms" class="small" style="max-height: 700px; overflow-y: auto;">
+                        <div class="text-center p-5">
+                            <div class="spinner-border spinner-border-sm text-primary mb-3" role="status"></div>
+                            <p class="text-muted mb-0">Loading swarms data...</p>
                         </div>
-                        <div class="form-group">
-                            <label for="intersection">Nearest Major Intersection</label>
-                            <input type="text" class="form-control" id="intersection" name="intersection" placeholder="e.g., Yonge & Bloor" required>
-                        </div>
-                        
-                        <!-- Contact Information Section -->
-                        <div class="form-section mt-4 p-3 border rounded" style="background-color: #f8f9fa;">
-                            <h6 class="mb-3">📞 Contact Information (Optional but Recommended)</h6>
-                            <p class="small text-muted mb-3">Providing your contact details helps beekeepers reach you for additional information or to coordinate swarm collection.</p>
-                            
-                            <div class="form-group">
-                                <label for="reporterName">Your Name</label>
-                                <input type="text" class="form-control" id="reporterName" name="reporterName" placeholder="e.g., John Smith">
-                            </div>
-                            <div class="form-group">
-                                <label for="reporterEmail">Email Address</label>
-                                <input type="email" class="form-control" id="reporterEmail" name="reporterEmail" placeholder="e.g., john@example.com">
-                            </div>
-                            <div class="form-group">
-                                <label for="reporterPhone">Phone Number</label>
-                                <input type="tel" class="form-control" id="reporterPhone" name="reporterPhone" placeholder="e.g., (416) 555-0123">
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="media">📸 Upload Photo(s) and/or Video(s) (Optional)</label>
-                            <div class="file-upload-section">
-                                <input type="file" id="gallery-input" accept="image/*,video/*" multiple style="display: none;">
-                                <input type="file" id="camera-input" accept="image/*" capture="environment" style="display: none;">
-                                <button type="button" class="btn btn-outline-primary" onclick="document.getElementById('gallery-input').click();">
-                                    <i class="fas fa-plus"></i> Add Photo/Video
-                                </button>
-                                <button type="button" class="btn btn-outline-secondary" onclick="document.getElementById('camera-input').click();">
-                                    <i class="fas fa-camera"></i> Take Photo/Video
-                                </button>
-                                <small class="form-text text-muted">Supported: JPG, PNG, HEIC, MP4, MOV, AVI, 3GP (max 50MB each)</small>
-                            </div>
-                            
-                            <!-- File management area -->
-                            <div id="fileManagementArea" style="margin-top: 15px; display: none;">
-                                <h6>Selected Files:</h6>
-                                <div id="selectedFilesList" class="border rounded p-3" style="max-height: 300px; overflow-y: auto; background-color: #f8f9fa;">
-                                    <!-- Selected files will be displayed here -->
-                                </div>
-                                <div class="mt-2 d-flex justify-content-between align-items-center">
-                                    <small class="text-success">✓ <span id="totalFileCount">0</span> file(s) ready to upload</small>
-                                    <button type="button" class="btn btn-sm btn-outline-danger" id="clearAllFilesBtn">
-                                        <i class="fas fa-trash"></i> Clear All
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <input type="hidden" id="latitude" name="latitude">
-                        <input type="hidden" id="longitude" name="longitude">
-                        <button type="submit" class="btn btn-primary">Submit Report</button>
-                    </form>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
+
+<style>
+    .legend-color {
+        width: 14px;
+        height: 14px;
+        border-radius: 4px;
+        margin-right: 12px;
+        display: inline-block;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
     
-    <!-- TODO: Add a separate modal for UTBA members to update status -->
+    .legend-item {
+        padding: 8px 12px;
+        border-radius: 8px;
+        transition: background-color 0.2s ease;
+    }
+    
+    .legend-item:hover {
+        background-color: #f8f9fa;
+    }
 
-    <script src="{{if .FrontendAssetsURL}}{{.FrontendAssetsURL}}{{end}}/static/vendor/leaflet/js/leaflet.js"></script>
-    <script>
-        var map = L.map('map').setView([43.6532, -79.3832], 10);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
-    </script>
-    {{template "footer.html" .}}
-</body>
-</html> 
+    /* Custom popup styling */
+    .mapboxgl-popup-content {
+        padding: 0;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.15);
+        border: none;
+        max-width: 320px;
+    }
+    
+    .mapboxgl-popup-close-button {
+        padding: 8px;
+        color: white;
+        font-size: 16px;
+        z-index: 10;
+    }
+    
+    .swarm-popup-header {
+        background: linear-gradient(135deg, #2f3640 0%, #1e272e 100%);
+        color: white;
+        padding: 15px 20px;
+    }
+    
+    .swarm-popup-body {
+        padding: 20px;
+    }
+    
+    .status-badge {
+        font-size: 10px;
+        padding: 4px 10px;
+        border-radius: 20px;
+        text-transform: uppercase;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+    }
+    
+    .btn-claim {
+        background-color: #ff8c00;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        border-radius: 8px;
+        font-weight: 600;
+        font-size: 14px;
+        width: 100%;
+        transition: all 0.2s;
+        margin-top: 10px;
+    }
+    
+    .btn-claim:hover {
+        background-color: #e67e00;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(255, 140, 0, 0.3);
+    }
+</style>
+
+{{template "footer.html" .}}
