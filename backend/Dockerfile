@@ -1,5 +1,7 @@
+# Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 # STAGE 1: Build the application
-FROM golang:1.25.8-alpine AS builder
+FROM golang:1.25.9-alpine AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -9,12 +11,16 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /app/server .
 
 # STAGE 2: Create the final, minimal image
-FROM alpine:latest
+FROM alpine:3.21.3
 
+# hadolint ignore=DL3018
 RUN apk add --no-cache tzdata
 WORKDIR /app
 COPY --from=builder /app/server /app/server
 COPY --from=builder /src/templates /app/templates/
+# Copy static assets if they were provided in the build context
+# We use a wildcard to avoid failure if the directory is missing
+COPY static* /app/static/
 
 ENV PORT=8080
 EXPOSE 8080

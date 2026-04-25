@@ -1,3 +1,5 @@
+// Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 package handlers
 
 import (
@@ -16,6 +18,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/fkcurrie/utba-swarmmap/models"
+	"github.com/fkcurrie/utba-swarmmap/service"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 )
@@ -177,6 +180,9 @@ func (m *MockStore) UpdateSwarm(_ context.Context, swarmID string, updates []fir
 				if update.Path == "assignedCollectorID" {
 					m.Swarms[i].AssignedCollectorID = update.Value.(string)
 				}
+				if update.Path == "assignedCollectorEmail" {
+					m.Swarms[i].AssignedCollectorEmail = update.Value.(string)
+				}
 			}
 			return nil
 		}
@@ -252,6 +258,18 @@ func (m *MockStore) GetSwarmsBySessionID(_ context.Context, sessionID string) ([
 	return userSwarms, nil
 }
 
+// MockSwarmService is a mock implementation of the SwarmService interface for testing.
+type MockSwarmService struct {
+	GetSwarmsFunc func(ctx context.Context, sessionID string, user *models.Session) ([]models.SwarmReport, error)
+}
+
+func (m *MockSwarmService) GetSwarms(ctx context.Context, sessionID string, user *models.Session) ([]models.SwarmReport, error) {
+	if m.GetSwarmsFunc != nil {
+		return m.GetSwarmsFunc(ctx, sessionID, user)
+	}
+	return nil, nil
+}
+
 func TestGetSwarmsHandler_WithSwarms(t *testing.T) {
 	// Prepare a mock store with some data
 	mockSwarms := []models.SwarmReport{
@@ -259,15 +277,28 @@ func TestGetSwarmsHandler_WithSwarms(t *testing.T) {
 		{ID: "2", Description: "Swarm 2", Status: "Captured", ReportedTimestamp: time.Now().Add(-25 * time.Hour)},
 		{ID: "3", Description: "Swarm 3", Status: "Reported", ReportedTimestamp: time.Now().Add(-25 * time.Hour)},
 	}
-	mockStore := &MockStore{Swarms: mockSwarms}
+	mockStore := &MockStore{
+		Swarms: mockSwarms,
+		Sessions: map[string]models.Session{
+			"collector-session": {
+				UserID:    "collector-123",
+				Role:      "collector",
+				ExpiresAt: time.Now().Add(1 * time.Hour),
+			},
+		},
+	}
 
-	// Initialize handlers with the mock store
-	h := &Handlers{Store: mockStore}
+	// Initialize handlers with the mock store and swarm service
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/get_swarms", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	req.AddCookie(&http.Cookie{Name: "session", Value: "collector-session"})
 
 	rr := httptest.NewRecorder()
 	handler := http.HandlerFunc(h.GetSwarmsHandler)
@@ -303,8 +334,125 @@ func TestGetSwarmsHandler_WithSwarms(t *testing.T) {
 	}
 }
 
-func TestLoginHandler(t *testing.T) {
+func TestGetSwarmsHandler_PublicRestriction(t *testing.T) {
+	// Prepare a mock store with some data
+	mockSwarms := []models.SwarmReport{
+		{ID: "1", Description: "Swarm 1", Status: "Reported", ReportedTimestamp: time.Now()},
+	}
+	mockStore := &MockStore{Swarms: mockSwarms}
+
+	// Initialize handlers with the mock store and swarm service
 	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
+
+	// Request WITHOUT session or sessionId
+	req, err := http.NewRequest("GET", "/get_swarms", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(h.GetSwarmsHandler)
+	handler.ServeHTTP(rr, req)
+
+	// Check status code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	// Check the response body
+	var returnedSwarms []models.SwarmReport
+	if err := json.NewDecoder(rr.Body).Decode(&returnedSwarms); err != nil {
+		t.Fatalf("could not decode response body: %v", err)
+	}
+
+	if len(returnedSwarms) != 0 {
+		t.Errorf("public request should return 0 swarms, got %d", len(returnedSwarms))
+	}
+}
+
+func TestGetSwarmsHandler_ReporterSession(t *testing.T) {
+	// Prepare a mock store with some data
+	mockSwarms := []models.SwarmReport{
+		{ID: "1", Description: "Reporter Swarm", ReporterSessionID: "reporter-123", ReportedTimestamp: time.Now()},
+		{ID: "2", Description: "Other Swarm", ReporterSessionID: "other-456", ReportedTimestamp: time.Now()},
+	}
+	mockStore := &MockStore{Swarms: mockSwarms}
+
+	// Initialize handlers with the mock store and swarm service
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
+
+	// Request WITH sessionId
+	req, err := http.NewRequest("GET", "/get_swarms?sessionId=reporter-123", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(h.GetSwarmsHandler)
+	handler.ServeHTTP(rr, req)
+
+	// Check status code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	// Check the response body
+	var returnedSwarms []models.SwarmReport
+	if err := json.NewDecoder(rr.Body).Decode(&returnedSwarms); err != nil {
+		t.Fatalf("could not decode response body: %v", err)
+	}
+
+	if len(returnedSwarms) != 1 {
+		t.Errorf("reporter request should return 1 swarm, got %d", len(returnedSwarms))
+	}
+
+	if returnedSwarms[0].ID != "1" {
+		t.Errorf("reporter request returned wrong swarm: got %s want 1", returnedSwarms[0].ID)
+	}
+}
+
+func TestGetSwarmsHandler_NoSwarms(t *testing.T) {
+	// Prepare a mock store with NO data
+	mockStore := &MockStore{Swarms: []models.SwarmReport{}}
+
+	// Initialize handlers with the mock store and swarm service
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
+
+	req, err := http.NewRequest("GET", "/get_swarms", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(h.GetSwarmsHandler)
+	handler.ServeHTTP(rr, req)
+
+	// Check status code
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v", status, http.StatusOK)
+	}
+
+	// Check the response body is "[]\n"
+	body := strings.TrimSpace(rr.Body.String())
+	if body != "[]" {
+		t.Errorf("expected empty array '[]', got '%s'", body)
+	}
+}
+
+func TestLoginHandler(t *testing.T) {
+	mockStore := &MockStore{}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
 		GoogleOAuthConfig: &oauth2.Config{
 			RedirectURL:  "http://localhost/auth/google/callback",
 			ClientID:     "test-client-id",
@@ -330,7 +478,11 @@ func TestLoginHandler(t *testing.T) {
 }
 
 func TestGoogleCallbackHandler_InvalidState(t *testing.T) {
-	h := &Handlers{} // No dependencies needed for this specific test case
+	mockStore := &MockStore{}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	} // No dependencies needed for this specific test case
 
 	req, err := http.NewRequest("GET", "/auth/google/callback?state=", nil)
 	if err != nil {
@@ -350,7 +502,10 @@ func TestGoogleCallbackHandler_InvalidState(t *testing.T) {
 func TestDashboardHandler_Unauthenticated(t *testing.T) {
 	// No session in the mock store
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/dashboard", nil)
 	if err != nil {
@@ -375,7 +530,10 @@ func TestLogoutHandler(t *testing.T) {
 			"test-session-id": {UserID: "test-user"},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/logout", nil)
 	if err != nil {
@@ -404,7 +562,10 @@ func TestAuthHandler_Authenticated(t *testing.T) {
 			"test-session-id": {UserID: "test-user", Username: "test@example.com", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/auth", nil)
 	if err != nil {
@@ -433,7 +594,10 @@ func TestAuthHandler_Authenticated(t *testing.T) {
 
 func TestPrepareSwarmHandler_ValidRequest(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	// Create a multipart form request
 	body := new(bytes.Buffer)
@@ -455,11 +619,12 @@ func TestPrepareSwarmHandler_ValidRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := part.Write([]byte("dummy image data")); err != nil {
+	if _, err := part.Write([]byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00\x48\x00\x48\x00\x00\xff\xdb\x00\x43\x00\xff\xd8")); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
-t.Errorf("Error closing writer: %v", err)	}
+		t.Errorf("Error closing writer: %v", err)
+	}
 
 	req, err := http.NewRequest("POST", "/prepare_swarm", body)
 	if err != nil {
@@ -488,7 +653,10 @@ t.Errorf("Error closing writer: %v", err)	}
 
 func TestPrepareSwarmHandler_VideoRequest(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	// Create a multipart form request with a video
 	body := new(bytes.Buffer)
@@ -533,9 +701,62 @@ func TestPrepareSwarmHandler_VideoRequest(t *testing.T) {
 	}
 }
 
+func TestPrepareSwarmHandler_QuicktimeVideoRequest(t *testing.T) {
+	mockStore := &MockStore{}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
+
+	// Create a multipart form request with a quicktime video
+	body := new(bytes.Buffer)
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("description", "A test swarm with MOV"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("latitude", "43.6532"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("longitude", "-79.3832"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.WriteField("intersection", "Yonge & Bloor"); err != nil {
+		t.Fatal(err)
+	}
+	// Create a dummy MOV file part
+	part, err := writer.CreateFormFile("media", "test.mov")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write([]byte("dummy mov data")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req, err := http.NewRequest("POST", "/prepare_swarm", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+
+	rr := httptest.NewRecorder()
+	handler := http.HandlerFunc(h.PrepareSwarmHandler)
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Errorf("handler returned wrong status code: got %v want %v, body: %s",
+			status, http.StatusOK, rr.Body.String())
+	}
+}
+
 func TestConfirmSwarmHandler_ValidRequest(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	// Create a multipart form request
 	body := new(bytes.Buffer)
@@ -559,11 +780,12 @@ func TestConfirmSwarmHandler_ValidRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := part.Write([]byte("dummy image data")); err != nil {
+	if _, err := part.Write([]byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x01\x00\x48\x00\x48\x00\x00\xff\xdb\x00\x43\x00\xff\xd8")); err != nil {
 		t.Fatal(err)
 	}
 	if err := writer.Close(); err != nil {
-t.Errorf("Error closing writer: %v", err)	}
+		t.Errorf("Error closing writer: %v", err)
+	}
 
 	req, err := http.NewRequest("POST", "/confirm_swarm", body)
 	if err != nil {
@@ -583,7 +805,10 @@ t.Errorf("Error closing writer: %v", err)	}
 
 func TestConfirmSwarmHandler_URLEncoded(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	// Create a URL encoded request (like the frontend does)
 	form := url.Values{}
@@ -612,7 +837,10 @@ func TestConfirmSwarmHandler_URLEncoded(t *testing.T) {
 
 func TestSwarmListHandler_Unauthenticated(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/swarmlist", nil)
 	if err != nil {
@@ -631,7 +859,10 @@ func TestSwarmListHandler_Unauthenticated(t *testing.T) {
 
 func TestCollectorsMapHandler_Unauthenticated(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/collectorsmap", nil)
 	if err != nil {
@@ -654,7 +885,10 @@ func TestAdminHandler_Unauthorized(t *testing.T) {
 			"test-session-id": {UserID: "test-user", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/admin", nil)
 	if err != nil {
@@ -674,7 +908,10 @@ func TestAdminHandler_Unauthorized(t *testing.T) {
 
 func TestGenerateSampleDataHandler(t *testing.T) {
 	mockStore := &MockStore{}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	// Create a request with a session ID in the body
 	body := strings.NewReader(`{"sessionId": "test-session-id"}`)
@@ -708,7 +945,10 @@ func TestApproveUserHandler(t *testing.T) {
 			"test-session-id": {UserID: "admin-user", Role: "site_admin", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	body := strings.NewReader("userID=test-user-id")
 	req, err := http.NewRequest("POST", "/admin/approve_user", body)
@@ -741,7 +981,10 @@ func TestRejectUserHandler(t *testing.T) {
 			"test-session-id": {UserID: "admin-user", Role: "site_admin", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	body := strings.NewReader("userID=test-user-id")
 	req, err := http.NewRequest("POST", "/admin/reject_user", body)
@@ -774,7 +1017,10 @@ func TestDeleteSwarmHandler(t *testing.T) {
 			"test-session-id": {UserID: "admin-user", Role: "site_admin", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	body := strings.NewReader("swarmID=test-swarm-id")
 	req, err := http.NewRequest("POST", "/admin/delete_swarm", body)
@@ -807,7 +1053,10 @@ func TestPromoteUserHandler(t *testing.T) {
 			"test-session-id": {UserID: "admin-user", Role: "site_admin", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	body := strings.NewReader("userID=test-user-id&role=collector_admin")
 	req, err := http.NewRequest("POST", "/admin/promote_user", body)
@@ -840,7 +1089,10 @@ func TestUpdateSwarmStatusHandler(t *testing.T) {
 			"test-session-id": {UserID: "test-user", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	body := strings.NewReader(`{"id": "test-swarm-id", "status": "Verified"}`)
 	req, err := http.NewRequest("POST", "/update_swarm_status", body)
@@ -870,10 +1122,13 @@ func TestAssignSwarmHandler(t *testing.T) {
 			{ID: "test-swarm-id"},
 		},
 		Sessions: map[string]models.Session{
-			"test-session-id": {UserID: "test-user", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
+			"test-session-id": {UserID: "test-user", Username: "test@example.com", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	body := strings.NewReader("swarmID=test-swarm-id&action=assign")
 	req, err := http.NewRequest("POST", "/assign_swarm", body)
@@ -895,6 +1150,51 @@ func TestAssignSwarmHandler(t *testing.T) {
 	if mockStore.Swarms[0].AssignedCollectorID != "test-user" {
 		t.Error("expected swarm to be assigned to the user")
 	}
+	if mockStore.Swarms[0].AssignedCollectorEmail != "test@example.com" {
+		t.Error("expected swarm to be assigned to the user email")
+	}
+}
+
+func TestClaimSwarmHandler(t *testing.T) {
+	mockStore := &MockStore{
+		Swarms: []models.SwarmReport{
+			{ID: "test-swarm-id", Status: "Reported"},
+		},
+		Sessions: map[string]models.Session{
+			"test-session-id": {UserID: "test-user", Username: "test@example.com", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
+		},
+	}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
+
+	body := strings.NewReader("swarmID=test-swarm-id")
+	req, err := http.NewRequest("POST", "/claim_swarm", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "session", Value: "test-session-id"})
+
+	rr := httptest.NewRecorder()
+	handler := h.RequireAuth(h.RequireRole("collector", http.HandlerFunc(h.ClaimSwarmHandler)))
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusSeeOther {
+		t.Errorf("handler returned wrong status code: got %v want %v",
+			status, http.StatusSeeOther)
+	}
+
+	if mockStore.Swarms[0].AssignedCollectorID != "test-user" {
+		t.Error("expected swarm to be assigned to the user ID")
+	}
+	if mockStore.Swarms[0].AssignedCollectorEmail != "test@example.com" {
+		t.Error("expected swarm to be assigned to the user email")
+	}
+	if mockStore.Swarms[0].Status != "Claimed" {
+		t.Errorf("expected swarm status to be 'Claimed', got '%s'", mockStore.Swarms[0].Status)
+	}
 }
 
 func TestCollectorAdminHandler_Unauthorized(t *testing.T) {
@@ -903,7 +1203,10 @@ func TestCollectorAdminHandler_Unauthorized(t *testing.T) {
 			"test-session-id": {UserID: "test-user", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
 		},
 	}
-	h := &Handlers{Store: mockStore}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
 
 	req, err := http.NewRequest("GET", "/collector_admin", nil)
 	if err != nil {
@@ -922,7 +1225,10 @@ func TestCollectorAdminHandler_Unauthorized(t *testing.T) {
 }
 
 func TestLoginRouting(t *testing.T) {
+	mockStore := &MockStore{}
 	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
 		GoogleOAuthConfig: &oauth2.Config{
 			RedirectURL:  "http://localhost/auth/google/callback",
 			ClientID:     "test-client-id",
@@ -960,9 +1266,14 @@ func TestUsernameRegisterHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Error parsing templates: %v", err)
 	}
-	h := &Handlers{Store: mockStore, Templates: tmpl}
+	h := &Handlers{
+		Store:           mockStore,
+		SwarmService:    service.NewSwarmService(mockStore),
+		LocationService: &MockLocationService{MockIntersection: "Test Intersection"},
+		Templates:       tmpl,
+	}
 
-	body := strings.NewReader("email=test@example.com&password=password123&name=Test+User&phone=123456789&location=London")
+	body := strings.NewReader("email=test@example.com&password=password123&name=Test+User&phone=123456789&location=London&experience_years=5&equipment=Ladders&competency_notes=Professional")
 	req, err := http.NewRequest("POST", "/auth/register", body)
 	if err != nil {
 		t.Fatal(err)
@@ -986,12 +1297,67 @@ func TestUsernameRegisterHandler(t *testing.T) {
 		t.Errorf("expected email to be test@example.com, got %s", mockStore.Users[0].Email)
 	}
 
+	if mockStore.Users[0].ExperienceYears != 5 {
+		t.Errorf("expected experience_years to be 5, got %d", mockStore.Users[0].ExperienceYears)
+	}
+
+	if mockStore.Users[0].Equipment != "Ladders" {
+		t.Errorf("expected equipment to be Ladders, got %s", mockStore.Users[0].Equipment)
+	}
+
 	if mockStore.Users[0].EmailVerified {
 		t.Error("expected email_verified to be false")
 	}
 
 	if mockStore.Users[0].VerificationToken == "" {
 		t.Error("expected verification_token to be set")
+	}
+}
+
+func TestUnclaimSwarmHandler(t *testing.T) {
+	mockStore := &MockStore{
+		Swarms: []models.SwarmReport{
+			{
+				ID:                     "test-swarm-id",
+				Status:                 "Claimed",
+				AssignedCollectorID:    "test-user",
+				AssignedCollectorEmail: "test@example.com",
+			},
+		},
+		Sessions: map[string]models.Session{
+			"test-session-id": {UserID: "test-user", Username: "test@example.com", Role: "collector", ExpiresAt: time.Now().Add(1 * time.Hour)},
+		},
+	}
+	h := &Handlers{
+		Store:        mockStore,
+		SwarmService: service.NewSwarmService(mockStore),
+	}
+
+	body := strings.NewReader("swarmID=test-swarm-id")
+	req, err := http.NewRequest("POST", "/unclaim_swarm", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.AddCookie(&http.Cookie{Name: "session", Value: "test-session-id"})
+
+	rr := httptest.NewRecorder()
+	handler := h.RequireAuth(h.RequireRole("collector", http.HandlerFunc(h.UnclaimSwarmHandler)))
+	handler.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusSeeOther {
+		t.Errorf("handler returned wrong status code: got %v want %v",
+			status, http.StatusSeeOther)
+	}
+
+	if mockStore.Swarms[0].AssignedCollectorID != "" {
+		t.Errorf("expected AssignedCollectorID to be empty, got %v", mockStore.Swarms[0].AssignedCollectorID)
+	}
+	if mockStore.Swarms[0].AssignedCollectorEmail != "" {
+		t.Errorf("expected AssignedCollectorEmail to be empty, got %v", mockStore.Swarms[0].AssignedCollectorEmail)
+	}
+	if mockStore.Swarms[0].Status != "Reported" {
+		t.Errorf("expected swarm status to be 'Reported', got '%s'", mockStore.Swarms[0].Status)
 	}
 }
 

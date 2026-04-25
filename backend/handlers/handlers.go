@@ -1,32 +1,63 @@
+// Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"html/template"
-	"log"
+	"log/slog"
 	"net/http"
-	"strconv"
-	"time"
+	"strings"
 
-	"github.com/fkcurrie/utba-swarmmap/models"
+	"github.com/fkcurrie/utba-swarmmap/service"
 	"github.com/fkcurrie/utba-swarmmap/store"
 	"golang.org/x/oauth2"
 )
 
+type AIService interface {
+	InterpretFeedback(ctx context.Context, rawText string, feedbackType string, context FeedbackContext) (string, error)
+}
+
 type Handlers struct {
 	Store             store.Storer
+	SwarmService      service.SwarmService
+	LocationService   LocationService
+	GitHubService     GitHubService
+	AIService         AIService
 	GoogleOAuthConfig *oauth2.Config
 	AppleOAuthConfig  *oauth2.Config
 	Version           string
 	Templates         *template.Template
 	FrontendAssetsURL string
+	MapboxToken       string
+	GithubToken       string
+	GithubRepo        string
+}
+
+func (h *Handlers) jsonError(w http.ResponseWriter, message string, code int) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(map[string]string{"error": message}); err != nil {
+		slog.Error("Failed to encode JSON error response", "error", err, "message", h.sanitize(message)) // #nosec G706
+	}
+}
+
+func (h *Handlers) sanitize(s string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(s, "\n", ""), "\r", "")
 }
 
 func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("DEBUG: IndexHandler called for %q", r.URL.Path) //nolint:gosec // G706: Path is quoted and safe for logging
+	slog.Debug("IndexHandler called", "path", h.sanitize(r.URL.Path)) // #nosec G706
 	if r.URL.Path != "/" {
-		log.Printf("DEBUG: Path not /, returning NotFound for %q", r.URL.Path) //nolint:gosec // G706: Path is quoted and safe for logging
+		slog.Debug("Path not /, returning NotFound", "path", h.sanitize(r.URL.Path)) // #nosec G706
 		http.NotFound(w, r)
+		return
+	}
+
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -37,56 +68,34 @@ func (h *Handlers) IndexHandler(w http.ResponseWriter, r *http.Request) {
 		"Version":           h.Version,
 		"User":              session,
 		"FrontendAssetsURL": h.FrontendAssetsURL,
+		"MapboxToken":       h.MapboxToken,
 	})
 	if err != nil {
-		log.Printf("Error executing template: %v", err)
+		slog.Error("Error executing template", "error", err) // #nosec G706
 		http.Error(w, "Failed to render page", http.StatusInternalServerError)
+		return
 	}
 }
 
 func (h *Handlers) GetSwarmsHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
+		h.jsonError(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	ctx := r.Context()
-	var currentReports []models.SwarmReport
-	var err error
-
 	sessionID := r.URL.Query().Get("sessionId")
+	session := h.getSession(r)
 
-	if sessionID != "" {
-		log.Printf("Fetching swarms for public user session: %s", strconv.Quote(sessionID)) //nolint:gosec // G706: sessionID is quoted and safe for logging
-		currentReports, err = h.Store.GetSwarmsBySessionID(ctx, sessionID)
-	} else {
-		log.Printf("Fetching all swarms")
-		currentReports, err = h.Store.GetAllSwarms(ctx)
-	}
-
+	currentReports, err := h.SwarmService.GetSwarms(ctx, sessionID, session)
 	if err != nil {
-		log.Printf("Error fetching reports: %v", err)
-		http.Error(w, "Error fetching reports", http.StatusInternalServerError)
+		slog.Error("Error fetching reports from service", "error", err) // #nosec G706
+		h.jsonError(w, "Error fetching reports", http.StatusInternalServerError)
 		return
 	}
 
-	// Dynamic DisplayStatus logic
-	for i := range currentReports {
-		currentReports[i].DisplayStatus = currentReports[i].Status
-		if currentReports[i].Status != "Captured" && time.Since(currentReports[i].ReportedTimestamp).Hours() > 24 {
-			currentReports[i].DisplayStatus = "Archived"
-		}
-	}
-
-	log.Printf("Returning %d swarms", len(currentReports)) // #nosec G706
-	data, err := json.Marshal(currentReports)
-	if err != nil {
-		log.Printf("Error marshalling reports to JSON: %v", err)
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-		return
-	}
-
+	slog.Info("Returning swarms", "count", len(currentReports)) // #nosec G706
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(data); err != nil {
-		log.Printf("Failed to write swarms response: %v", err)
+	if err := json.NewEncoder(w).Encode(currentReports); err != nil {
+		slog.Error("Error encoding reports to JSON", "error", err) // #nosec G706
 	}
 }

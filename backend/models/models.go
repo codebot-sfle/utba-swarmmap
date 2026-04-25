@@ -1,24 +1,27 @@
+// Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 package models
 
 import "time"
 
 // SwarmReport defines the structure for a swarm report (matches Firestore document)
 type SwarmReport struct {
-	ID                    string    `firestore:"-" json:"id"` // Firestore doc ID, not stored in doc fields
-	Latitude              float64   `firestore:"latitude" json:"latitude"`
-	Longitude             float64   `firestore:"longitude" json:"longitude"`
-	Description           string    `firestore:"description" json:"description"`
-	Status                string    `firestore:"status" json:"status"`
-	ReportedTimestamp     time.Time `firestore:"reportedTimestamp" json:"reportedTimestamp"`
-	VerificationTimestamp time.Time `firestore:"verificationTimestamp,omitempty" json:"verificationTimestamp,omitempty"`
-	CapturedTimestamp     time.Time `firestore:"capturedTimestamp,omitempty" json:"capturedTimestamp,omitempty"`
-	LastUpdatedTimestamp  time.Time `firestore:"lastUpdatedTimestamp" json:"lastUpdatedTimestamp"`
-	ReportedMediaURLs     []string  `firestore:"reportedMediaURLs,omitempty" json:"reportedMediaURLs,omitempty"`
-	CapturedMediaURLs     []string  `firestore:"capturedMediaURLs,omitempty" json:"capturedMediaURLs,omitempty"`
-	BeekeeperNotes        string    `firestore:"beekeeperNotes,omitempty" json:"beekeeperNotes,omitempty"`
-	DisplayStatus         string    `firestore:"-" json:"displayStatus,omitempty"` // Transient, for frontend logic
-	NearestIntersection   string    `firestore:"nearestIntersection,omitempty" json:"nearestIntersection,omitempty"`
-	AssignedCollectorID   string    `firestore:"assignedCollectorID,omitempty" json:"assignedCollectorID,omitempty"`
+	ID                     string    `firestore:"-" json:"id"` // Firestore doc ID, not stored in doc fields
+	Latitude               float64   `firestore:"latitude" json:"latitude"`
+	Longitude              float64   `firestore:"longitude" json:"longitude"`
+	Description            string    `firestore:"description" json:"description"`
+	Status                 string    `firestore:"status" json:"status"`
+	ReportedTimestamp      time.Time `firestore:"reportedTimestamp" json:"reportedTimestamp"`
+	VerificationTimestamp  time.Time `firestore:"verificationTimestamp,omitempty" json:"verificationTimestamp,omitempty"`
+	CapturedTimestamp      time.Time `firestore:"capturedTimestamp,omitempty" json:"capturedTimestamp,omitempty"`
+	LastUpdatedTimestamp   time.Time `firestore:"lastUpdatedTimestamp" json:"lastUpdatedTimestamp"`
+	ReportedMediaURLs      []string  `firestore:"reportedMediaURLs,omitempty" json:"reportedMediaURLs,omitempty"`
+	CapturedMediaURLs      []string  `firestore:"capturedMediaURLs,omitempty" json:"capturedMediaURLs,omitempty"`
+	BeekeeperNotes         string    `firestore:"beekeeperNotes,omitempty" json:"beekeeperNotes,omitempty"`
+	DisplayStatus          string    `firestore:"-" json:"displayStatus,omitempty"` // Transient, for frontend logic
+	NearestIntersection    string    `firestore:"nearestIntersection,omitempty" json:"nearestIntersection,omitempty"`
+	AssignedCollectorID    string    `firestore:"assignedCollectorID,omitempty" json:"assignedCollectorID,omitempty"`
+	AssignedCollectorEmail string    `firestore:"assignedCollectorEmail,omitempty" json:"assignedCollectorEmail,omitempty"`
 	// Contact information for public reporters
 	ReporterName      string `firestore:"reporterName,omitempty" json:"reporterName,omitempty"`
 	ReporterEmail     string `firestore:"reporterEmail,omitempty" json:"reporterEmail,omitempty"`
@@ -41,6 +44,11 @@ type User struct {
 	ResetToken          string    `json:"-" firestore:"reset_token"`
 	ResetTokenExpiresAt time.Time `json:"-" firestore:"reset_token_expires_at"`
 	CreatedAt           time.Time `json:"created_at" firestore:"created_at"`
+
+	// Experience fields for collector application
+	ExperienceYears int    `json:"experience_years" firestore:"experience_years"`
+	Equipment       string `json:"equipment" firestore:"equipment"`
+	CompetencyNotes string `json:"competency_notes" firestore:"competency_notes"`
 }
 
 // Session defines user session structure
@@ -49,4 +57,5 @@ type Session struct {
 	Username  string    `json:"username"`
 	Role      string    `json:"role"`
 	ExpiresAt time.Time `json:"expiresAt"`
+	CSRFToken string    `json:"csrfToken"`
 }

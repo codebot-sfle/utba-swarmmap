@@ -1,8 +1,10 @@
+// Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"time"
@@ -21,8 +23,9 @@ func (h *Handlers) LoginPageHandler(w http.ResponseWriter, _ *http.Request) {
 		"FrontendAssetsURL": h.FrontendAssetsURL,
 	})
 	if err != nil {
-		log.Printf("Error rendering login page: %v", err)
+		slog.Error("Error rendering login page", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -34,8 +37,9 @@ func (h *Handlers) RegisterPageHandler(w http.ResponseWriter, _ *http.Request) {
 		"FrontendAssetsURL": h.FrontendAssetsURL,
 	})
 	if err != nil {
-		log.Printf("Error rendering register page: %v", err)
+		slog.Error("Error rendering register page", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -55,7 +59,7 @@ func (h *Handlers) UsernameLoginHandler(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	user, err := h.Store.GetUserByEmail(ctx, email)
 	if err != nil {
-		log.Printf("Error getting user by email %s: %v", strconv.Quote(email), err)
+		slog.Error("Error getting user by email", "error", err, "email", h.sanitize(email)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -98,11 +102,16 @@ func (h *Handlers) UsernameRegisterHandler(w http.ResponseWriter, r *http.Reques
 	name := r.FormValue("name")
 	phone := r.FormValue("phone")
 	location := r.FormValue("location")
+	experienceYearsStr := r.FormValue("experience_years")
+	equipment := r.FormValue("equipment")
+	competencyNotes := r.FormValue("competency_notes")
+
+	experienceYears, _ := strconv.Atoi(experienceYearsStr)
 
 	ctx := r.Context()
 	existingUser, err := h.Store.GetUserByEmail(ctx, email)
 	if err != nil {
-		log.Printf("Error checking existing user %s: %v", strconv.Quote(email), err)
+		slog.Error("Error checking existing user", "error", err, "email", h.sanitize(email)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -112,9 +121,14 @@ func (h *Handlers) UsernameRegisterHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	if len(password) < 8 {
+		h.renderRegisterPageWithError(w, "Password must be at least 8 characters long")
+		return
+	}
+
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("Error hashing password: %v", err)
+		slog.Error("Error hashing password", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -132,20 +146,47 @@ func (h *Handlers) UsernameRegisterHandler(w http.ResponseWriter, r *http.Reques
 		EmailVerified:     false,
 		VerificationToken: verificationToken,
 		CreatedAt:         time.Now(),
+		ExperienceYears:   experienceYears,
+		Equipment:         equipment,
+		CompetencyNotes:   competencyNotes,
 	}
 
 	_, err = h.Store.CreateUser(ctx, user)
 	if err != nil {
-		log.Printf("Error creating user %s: %v", strconv.Quote(email), err)
+		slog.Error("Error creating user", "error", err, "email", h.sanitize(email)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
 	// In a real app, send an email with the verification link.
 	// For this exercise, we'll just log it.
-	log.Printf("USER CREATED: %s. VERIFICATION LINK: /auth/verify-email?token=%s", strconv.Quote(email), strconv.Quote(verificationToken))
+	slog.Info("USER CREATED", "email", h.sanitize(email), "verificationToken", h.sanitize(verificationToken)) // #nosec G706
 
-	h.renderMessagePage(w, "Registration Successful", "Your account has been created. Please check your email (see logs) to verify your account.")
+	// Send notification to admins
+	h.sendAdminNotification(user)
+
+	h.renderMessagePage(w, "Application Submitted", "Your application has been submitted successfully. Please check your email (see logs) to verify your account. An administrator will review your application soon.")
+}
+
+func (h *Handlers) sendAdminNotification(user models.User) {
+	// For this implementation, we will log the "email" content.
+	// In a production environment, this would use net/smtp to send a real email.
+	subject := "New Collector Access Request"
+	body := "A new collector access request has been submitted.\n\n" +
+		"Name: " + user.Name + "\n" +
+		"Email: " + user.Email + "\n" +
+		"Location: " + user.Location + "\n" +
+		"Experience: " + strconv.Itoa(user.ExperienceYears) + " years\n" +
+		"Equipment: " + user.Equipment + "\n" +
+		"Competency: " + user.CompetencyNotes + "\n\n" +
+		"Review application here: /admin"
+
+	slog.Info("ADMIN NOTIFICATION EMAIL",
+		"subject", subject,
+		"to", "admin@example.com", // In real app, fetch from config/db
+		"userID", user.ID,
+		"body", body,
+	)
 }
 
 // VerifyEmailHandler handles email verification with a token.
@@ -159,7 +200,7 @@ func (h *Handlers) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	user, err := h.Store.GetUserByVerificationToken(ctx, token)
 	if err != nil {
-		log.Printf("Error getting user by verification token %s: %v", strconv.Quote(token), err) //nolint:gosec // G706: token is quoted and safe for logging
+		slog.Error("Error getting user by verification token", "error", err, "token", h.sanitize(token)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -174,7 +215,7 @@ func (h *Handlers) VerifyEmailHandler(w http.ResponseWriter, r *http.Request) {
 		"verification_token": "",
 	})
 	if err != nil {
-		log.Printf("Error updating user email verification: %v", err)
+		slog.Error("Error updating user email verification", "error", err, "userID", h.sanitize(user.ID)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -191,7 +232,7 @@ func (h *Handlers) createSessionAndRedirect(w http.ResponseWriter, r *http.Reque
 	}
 	sessionID, err := h.Store.CreateSession(r.Context(), session)
 	if err != nil {
-		log.Printf("Failed to create session: %v", err)
+		slog.Error("Failed to create session", "error", err, "userID", h.sanitize(user.ID)) // #nosec G706
 		http.Error(w, "Failed to create session", http.StatusInternalServerError)
 		return
 	}
@@ -210,21 +251,31 @@ func (h *Handlers) createSessionAndRedirect(w http.ResponseWriter, r *http.Reque
 }
 
 func (h *Handlers) renderLoginPageWithError(w http.ResponseWriter, errorMsg string) {
-	_ = h.Templates.ExecuteTemplate(w, "login.html", map[string]interface{}{
+	err := h.Templates.ExecuteTemplate(w, "login.html", map[string]interface{}{
 		"Title":             "Login",
 		"Version":           h.Version,
 		"Error":             errorMsg,
 		"FrontendAssetsURL": h.FrontendAssetsURL,
 	})
+	if err != nil {
+		slog.Error("Error rendering login page with error", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *Handlers) renderRegisterPageWithError(w http.ResponseWriter, errorMsg string) {
-	_ = h.Templates.ExecuteTemplate(w, "register.html", map[string]interface{}{
+	err := h.Templates.ExecuteTemplate(w, "register.html", map[string]interface{}{
 		"Title":             "Register",
 		"Version":           h.Version,
 		"Error":             errorMsg,
 		"FrontendAssetsURL": h.FrontendAssetsURL,
 	})
+	if err != nil {
+		slog.Error("Error rendering register page with error", "error", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
 }
 
 func (h *Handlers) renderMessagePage(w http.ResponseWriter, title, message string) {
@@ -235,8 +286,9 @@ func (h *Handlers) renderMessagePage(w http.ResponseWriter, title, message strin
 		"FrontendAssetsURL": h.FrontendAssetsURL,
 	})
 	if err != nil {
-		log.Printf("Error rendering message page: %v", err)
+		slog.Error("Error rendering message page", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 }
 
@@ -247,17 +299,29 @@ func (h *Handlers) showPendingApprovalPage(w http.ResponseWriter, name string) {
 		"FrontendAssetsURL": h.FrontendAssetsURL,
 	})
 	if err != nil {
-		log.Printf("Error rendering pending approval page: %v", err)
+		slog.Error("Error rendering pending approval page", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
 	}
 }
 
-// GoogleLoginHandler initiates the Google OAuth2 login flow.
 func (h *Handlers) GoogleLoginHandler(w http.ResponseWriter, r *http.Request) {
-	log.Printf("DEBUG: GoogleLoginHandler called for %q", r.URL.Path) //nolint:gosec // G706: Path is quoted and safe for logging
+	slog.Debug("GoogleLoginHandler called", "path", h.sanitize(r.URL.Path)) // #nosec G706
 	state := uuid.New().String()
+
+	// Store state in a cookie to verify it in the callback
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		MaxAge:   300, // 5 minutes
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	url := h.GoogleOAuthConfig.AuthCodeURL(state, oauth2.SetAuthURLParam("prompt", "select_account"))
-	log.Printf("DEBUG: Redirecting to %q", url) //nolint:gosec // G706: url is safe for logging
+	slog.Debug("Redirecting to Google Auth", "url", h.sanitize(url)) // #nosec G706
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
 
@@ -268,6 +332,18 @@ func (h *Handlers) AppleLoginHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state := uuid.New().String()
+
+	// Store state in a cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		Path:     "/",
+		MaxAge:   300,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	url := h.AppleOAuthConfig.AuthCodeURL(state)
 	http.Redirect(w, r, url, http.StatusTemporaryRedirect)
 }
@@ -281,11 +357,15 @@ func (h *Handlers) AppleCallbackHandler(w http.ResponseWriter, _ *http.Request) 
 // ForgotPasswordHandler handles password reset requests.
 func (h *Handlers) ForgotPasswordHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		_ = h.Templates.ExecuteTemplate(w, "forgot-password.html", map[string]interface{}{
+		err := h.Templates.ExecuteTemplate(w, "forgot-password.html", map[string]interface{}{
 			"Title":             "Forgot Password",
 			"Version":           h.Version,
 			"FrontendAssetsURL": h.FrontendAssetsURL,
 		})
+		if err != nil {
+			slog.Error("Error rendering forgot-password page", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -297,7 +377,7 @@ func (h *Handlers) ForgotPasswordHandler(w http.ResponseWriter, r *http.Request)
 	ctx := r.Context()
 	user, err := h.Store.GetUserByEmail(ctx, email)
 	if err != nil {
-		log.Printf("Error getting user by email %s: %v", strconv.Quote(email), err)
+		slog.Error("Error getting user by email", "error", err, "email", h.sanitize(email)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -311,12 +391,12 @@ func (h *Handlers) ForgotPasswordHandler(w http.ResponseWriter, r *http.Request)
 			"reset_token_expires_at": expiresAt,
 		})
 		if err != nil {
-			log.Printf("Error updating user reset token for %s: %v", strconv.Quote(email), err)
+			slog.Error("Error updating user reset token", "error", err, "email", h.sanitize(email)) // #nosec G706
 			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 			return
 		}
 
-		log.Printf("PASSWORD RESET REQUESTED: %s. RESET LINK: /auth/reset-password?token=%s", strconv.Quote(email), strconv.Quote(resetToken))
+		slog.Info("PASSWORD RESET REQUESTED", "email", h.sanitize(email), "resetToken", h.sanitize(resetToken)) // #nosec G706
 	}
 
 	h.renderMessagePage(w, "Reset Email Sent", "If an account exists with that email, a password reset link has been sent.")
@@ -331,12 +411,16 @@ func (h *Handlers) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	if r.Method == http.MethodGet {
-		_ = h.Templates.ExecuteTemplate(w, "reset-password.html", map[string]interface{}{
+		err := h.Templates.ExecuteTemplate(w, "reset-password.html", map[string]interface{}{
 			"Title":             "Reset Password",
 			"Version":           h.Version,
 			"Token":             token,
 			"FrontendAssetsURL": h.FrontendAssetsURL,
 		})
+		if err != nil {
+			slog.Error("Error rendering reset-password page", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
 		return
 	}
 
@@ -348,7 +432,7 @@ func (h *Handlers) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) 
 
 	user, err := h.Store.GetUserByResetToken(ctx, token)
 	if err != nil {
-		log.Printf("Error getting user by reset token %s: %v", strconv.Quote(token), err) //nolint:gosec // G706: token is quoted and safe for logging
+		slog.Error("Error getting user by reset token", "error", err, "token", h.sanitize(token)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -358,9 +442,24 @@ func (h *Handlers) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	if len(password) < 8 {
+		err := h.Templates.ExecuteTemplate(w, "reset-password.html", map[string]interface{}{
+			"Title":             "Reset Password",
+			"Version":           h.Version,
+			"Token":             token,
+			"Error":             "Password must be at least 8 characters long",
+			"FrontendAssetsURL": h.FrontendAssetsURL,
+		})
+		if err != nil {
+			slog.Error("Error rendering reset-password page with error", "error", err)
+			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		}
+		return
+	}
+
 	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		log.Printf("Error hashing password: %v", err)
+		slog.Error("Error hashing password", "error", err)
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
@@ -371,12 +470,12 @@ func (h *Handlers) ResetPasswordHandler(w http.ResponseWriter, r *http.Request) 
 		"reset_token_expires_at": time.Time{},
 	})
 	if err != nil {
-		log.Printf("Error updating user password for %s: %v", strconv.Quote(user.Email), err)
+		slog.Error("Error updating user password", "error", err, "email", h.sanitize(user.Email)) // #nosec G706
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("PASSWORD RESET SUCCESSFUL for %s", strconv.Quote(user.Email))
+	slog.Info("PASSWORD RESET SUCCESSFUL", "email", h.sanitize(user.Email)) // #nosec G706
 
 	h.renderMessagePage(w, "Password Reset Successful", "Your password has been reset. You can now log in with your new password.")
 }
@@ -386,7 +485,7 @@ func (h *Handlers) LogoutHandler(w http.ResponseWriter, r *http.Request) {
 	cookie, err := r.Cookie("session")
 	if err == nil && cookie.Value != "" {
 		if err := h.Store.DeleteSession(r.Context(), cookie.Value); err != nil {
-			log.Printf("Failed to delete session: %v", err)
+			slog.Error("Failed to delete session", "error", err)
 		}
 	}
 
@@ -409,7 +508,7 @@ func (h *Handlers) AuthHandler(w http.ResponseWriter, r *http.Request) {
 	if session == nil {
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{"authenticated": false}); err != nil {
-			log.Printf("Failed to encode auth response: %v", err)
+			slog.Error("Failed to encode auth response", "error", err)
 		}
 		return
 	}
@@ -419,7 +518,7 @@ func (h *Handlers) AuthHandler(w http.ResponseWriter, r *http.Request) {
 		"authenticated": true,
 		"user":          session,
 	}); err != nil {
-		log.Printf("Failed to encode auth response: %v", err)
+		slog.Error("Failed to encode auth response", "error", err)
 	}
 }
 
@@ -428,15 +527,33 @@ func (h *Handlers) GoogleCallbackHandler(w http.ResponseWriter, r *http.Request)
 	code := r.URL.Query().Get("code")
 	state := r.URL.Query().Get("state")
 
-	if state == "" {
+	// Verify state to prevent CSRF
+	cookie, err := r.Cookie("oauth_state")
+	if err != nil || cookie == nil || cookie.Value == "" || cookie.Value != state {
+		expected := ""
+		if cookie != nil {
+			expected = cookie.Value
+		}
+		slog.Warn("Invalid OAuth state", "expected", h.sanitize(expected), "actual", h.sanitize(state)) // #nosec G706
 		http.Error(w, "Invalid state parameter", http.StatusUnauthorized)
 		return
 	}
 
+	// Clear the state cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteLaxMode,
+	})
+
 	ctx := r.Context()
 	token, err := h.GoogleOAuthConfig.Exchange(ctx, code)
 	if err != nil {
-		log.Printf("Failed to exchange code for token: %v", err)
+		slog.Error("Failed to exchange code for token", "error", err)
 		http.Error(w, "Failed to authenticate", http.StatusInternalServerError)
 		return
 	}
@@ -444,7 +561,7 @@ func (h *Handlers) GoogleCallbackHandler(w http.ResponseWriter, r *http.Request)
 	client := h.GoogleOAuthConfig.Client(ctx, token)
 	resp, err := client.Get("https://www.googleapis.com/oauth2/v2/userinfo")
 	if err != nil {
-		log.Printf("Failed to get user info: %v", err)
+		slog.Error("Failed to get user info", "error", err)
 		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
 		return
 	}
@@ -455,14 +572,14 @@ func (h *Handlers) GoogleCallbackHandler(w http.ResponseWriter, r *http.Request)
 		Name  string `json:"name"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&userInfo); err != nil {
-		log.Printf("Failed to decode user info: %v", err)
+		slog.Error("Failed to decode user info", "error", err)
 		http.Error(w, "Failed to get user info", http.StatusInternalServerError)
 		return
 	}
 
 	existingUser, err := h.Store.GetUserByEmail(ctx, userInfo.Email)
 	if err != nil {
-		log.Printf("Failed to query user: %v", err)
+		slog.Error("Failed to query user", "error", err, "email", h.sanitize(userInfo.Email)) // #nosec G706
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
@@ -479,7 +596,7 @@ func (h *Handlers) GoogleCallbackHandler(w http.ResponseWriter, r *http.Request)
 
 		_, err = h.Store.CreateUser(ctx, user)
 		if err != nil {
-			log.Printf("Failed to create user: %v", err)
+			slog.Error("Failed to create user", "error", err, "email", h.sanitize(userInfo.Email)) // #nosec G706
 			http.Error(w, "Failed to create user", http.StatusInternalServerError)
 			return
 		}

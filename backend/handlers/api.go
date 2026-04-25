@@ -1,8 +1,10 @@
+// Copyright (c) 2026 Frank Currie (frank@sfle.ca)
+
 package handlers
 
 import (
 	"encoding/json"
-	"log"
+	"log/slog"
 	"net/http"
 )
 
@@ -24,49 +26,49 @@ func (h *Handlers) VisitsAPIHandler(w http.ResponseWriter, r *http.Request) {
 
 	visits, err := h.Store.GetVisitCounts(r.Context(), days)
 	if err != nil {
-		log.Printf("Error getting visit counts: %v", err)
-		http.Error(w, "Failed to retrieve visit data", http.StatusInternalServerError)
-		return
-	}
-
-	visitsJSON, err := json.Marshal(visits)
-	if err != nil {
-		log.Printf("Error marshalling visits to JSON: %v", err)
-		http.Error(w, "Failed to process visit data", http.StatusInternalServerError)
+		slog.Error("Error getting visit counts", "error", err) // #nosec G706
+		h.jsonError(w, "Failed to retrieve visit data", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write(visitsJSON); err != nil {
-		log.Printf("Failed to write visits response: %v", err)
+	if err := json.NewEncoder(w).Encode(visits); err != nil {
+		slog.Error("Error encoding visits to JSON", "error", err) // #nosec G706
 	}
 }
 
 func (h *Handlers) TrackVisitHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		h.jsonError(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// Limit request body size to 1MB
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 
 	var reqBody struct {
 		VisitorID string `json:"visitorId"`
 	}
 
 	if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		h.jsonError(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if reqBody.VisitorID == "" {
-		http.Error(w, "Visitor ID is required", http.StatusBadRequest)
+		h.jsonError(w, "Visitor ID is required", http.StatusBadRequest)
 		return
 	}
 
 	if err := h.Store.TrackVisit(r.Context(), reqBody.VisitorID); err != nil {
-		log.Printf("Failed to track visit: %v", err)
-		http.Error(w, "Failed to track visit", http.StatusInternalServerError)
+		slog.Error("Failed to track visit", "error", err) // #nosec G706
+		h.jsonError(w, "Failed to track visit", http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "success"}); err != nil {
+		slog.Error("Failed to encode track visit response", "error", err) // #nosec G706
+	}
 }
